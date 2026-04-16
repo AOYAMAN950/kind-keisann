@@ -124,13 +124,56 @@
   .day-cell.sat .dow { color: #1565c0; }
   .day-cell.sun .dow { color: #c62828; }
 
-  .time-input {
+  /* タップ式時刻セル */
+  .time-cell {
     width: 100%; border: 1px solid #e0e0e0; border-radius: 8px;
-    padding: 6px 4px; font-size: 14px; font-family: inherit;
+    padding: 7px 4px; font-size: 14px; font-weight: 600;
     text-align: center; background: #fafafa; color: #1a1a2e;
-    -webkit-appearance: none; outline: none;
+    cursor: pointer; -webkit-tap-highlight-color: rgba(255,109,0,0.12);
+    user-select: none;
   }
-  .time-input:focus { border-color: #ff6d00; background: #fffbe6; box-shadow: 0 0 0 2px rgba(255,109,0,0.15); }
+  .time-cell.empty { color: #ccc; font-size: 11px; font-weight: 400; }
+  .time-cell:active { background: #fff3e0; border-color: #ff6d00; }
+
+  /* 時刻ピッカーモーダル */
+  .timepick-bg {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 500;
+    align-items: flex-end; justify-content: center;
+  }
+  .timepick-bg.open { display: flex; }
+  .timepick-modal {
+    background: white; border-radius: 20px 20px 0 0;
+    padding: 20px 16px 36px; width: 100%; max-width: 480px;
+  }
+  .timepick-title { font-size: 16px; font-weight: 700; text-align: center; margin-bottom: 4px; }
+  .timepick-subtitle { font-size: 11px; color: #888; text-align: center; margin-bottom: 16px; }
+  .preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .preset-btn {
+    padding: 16px 4px; border: 2px solid #ff6d00; border-radius: 12px;
+    background: #fff8f0; color: #d84315; font-size: 19px; font-weight: 800;
+    font-family: inherit; cursor: pointer; text-align: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .preset-btn:active { background: #ff6d00; color: white; }
+  .custom-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .custom-row label { font-size: 12px; color: #888; white-space: nowrap; }
+  .custom-time-input {
+    flex: 1; border: 1px solid #ddd; border-radius: 10px;
+    padding: 12px 8px; font-size: 22px; font-weight: 700; text-align: center;
+    font-family: inherit; background: #fafafa; outline: none;
+  }
+  .custom-time-input:focus { border-color: #ff6d00; background: #fffbe6; }
+  .custom-apply-btn {
+    padding: 12px 16px; background: #2e7d32; color: white;
+    border: none; border-radius: 10px; font-size: 14px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+  }
+  .timepick-cancel {
+    width: 100%; padding: 12px; background: #f5f5f5; color: #555;
+    border: none; border-radius: 12px; font-size: 14px; font-weight: 600;
+    font-family: inherit; cursor: pointer; margin-top: 4px;
+  }
 
   .result-cell { text-align: center; font-size: 12px; line-height: 1.35; }
   .result-cell .hours { font-size: 15px; font-weight: 700; color: #d84315; }
@@ -351,6 +394,23 @@
   <button class="fab-btn primary" onclick="toggleCopy()">📋 一覧表示</button>
 </div>
 
+<!-- ======= 時刻ピッカーモーダル ======= -->
+<div class="timepick-bg" id="timePickBg" onclick="closeTimePicker(event)">
+  <div class="timepick-modal" onclick="event.stopPropagation()">
+    <div class="timepick-title" id="timePickTitle">始業時刻を選択</div>
+    <div class="timepick-subtitle" id="timePickSubtitle"></div>
+    <div class="preset-grid" id="presetGrid"></div>
+    <div class="custom-row">
+      <label>直接入力：</label>
+      <input type="text" class="custom-time-input" id="customTimeInput"
+             inputmode="numeric" placeholder="例: 830" maxlength="5"
+             oninput="onCustomTimeInput(this)">
+      <button class="custom-apply-btn" onclick="applyCustomTime()">確定</button>
+    </div>
+    <button class="timepick-cancel" onclick="closeTimePicker()">キャンセル</button>
+  </div>
+</div>
+
 <!-- ======= OCR モーダル ======= -->
 <div class="modal-bg" id="ocrModalBg" onclick="closeOcrModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
@@ -522,14 +582,14 @@ function render() {
 
     const row = document.createElement('div');
     row.className = rc; row.id = 'row_'+key;
+    const sDisp = entry.start || '';
+    const eDisp = entry.end   || '';
     row.innerHTML = `
       <div class="day-cell ${dow===0?'sun':dow===6?'sat':''}">
         <div>${dayLabel}</div><div class="dow">${DAYS_JA[dow]}</div>
       </div>
-      <input type="time" class="time-input" value="${entry.start||''}"
-             onchange="setTime('${key}','start',this.value)">
-      <input type="time" class="time-input" value="${entry.end||''}"
-             onchange="setTime('${key}','end',this.value)">
+      <div class="time-cell${sDisp?'':' empty'}" onclick="openTimePicker('${key}','start')">${sDisp||'始業'}</div>
+      <div class="time-cell${eDisp?'':' empty'}" onclick="openTimePicker('${key}','end')">${eDisp||'就業'}</div>
       ${resultHtml}
       <button class="clear-btn" onclick="clearDay('${key}')">×</button>`;
     tbody.appendChild(row);
@@ -605,6 +665,72 @@ function copyText() {
   const ta=document.getElementById('copyText'); ta.select();
   try { navigator.clipboard.writeText(ta.value).then(()=>alert('コピーしました！')); }
   catch(e) { document.execCommand('copy'); alert('コピーしました！'); }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━
+//  時刻ピッカー
+// ━━━━━━━━━━━━━━━━━━━━
+const START_PRESETS = ['7:45', '8:30', '10:30'];
+const END_PRESETS   = ['17:00', '17:15', '17:30', '18:00'];
+
+let pickKey = null, pickField = null;
+
+function openTimePicker(key, field) {
+  pickKey = key; pickField = field;
+  const isStart = field === 'start';
+  const presets = isStart ? START_PRESETS : END_PRESETS;
+  document.getElementById('timePickTitle').textContent = isStart ? '始業時刻を選択' : '就業時刻を選択';
+  // 現在値を補足表示
+  const cur = (data[key]||{})[field];
+  document.getElementById('timePickSubtitle').textContent = cur ? `現在: ${cur}` : '';
+  // プリセットボタン生成
+  const grid = document.getElementById('presetGrid');
+  grid.innerHTML = '';
+  // グリッド列数をプリセット数に合わせる
+  grid.style.gridTemplateColumns = `repeat(${presets.length}, 1fr)`;
+  presets.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = t;
+    btn.onclick = () => { setTime(pickKey, pickField, t); closeTimePicker(); };
+    grid.appendChild(btn);
+  });
+  document.getElementById('customTimeInput').value = '';
+  document.getElementById('timePickBg').classList.add('open');
+  // 少し後にフォーカス（モーダルが開いてから）
+  setTimeout(() => document.getElementById('customTimeInput').focus(), 200);
+}
+
+function onCustomTimeInput(el) {
+  // 数字とコロンのみ許可、コロン自動挿入
+  let v = el.value.replace(/[^0-9:]/g, '');
+  // 4桁数字なら自動でコロン挿入 "0830" → "08:30"
+  if (/^\d{4}$/.test(v)) v = v.slice(0,2) + ':' + v.slice(2);
+  el.value = v;
+}
+
+function applyCustomTime() {
+  const raw = document.getElementById('customTimeInput').value.trim();
+  const parsed = parseTimeStr(raw);
+  if (!parsed) { alert('形式が正しくありません。\n例：830 または 8:30'); return; }
+  setTime(pickKey, pickField, parsed);
+  closeTimePicker();
+}
+
+function parseTimeStr(raw) {
+  let h, m;
+  const digits = raw.replace(':', '');
+  if (/^\d{3}$/.test(digits))      { h = parseInt(digits[0]);       m = parseInt(digits.slice(1)); }
+  else if (/^\d{4}$/.test(digits)) { h = parseInt(digits.slice(0,2)); m = parseInt(digits.slice(2)); }
+  else if (/^\d{1,2}:\d{2}$/.test(raw)) { [h, m] = raw.split(':').map(Number); }
+  else return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+function closeTimePicker(e) {
+  if (!e || e.target === document.getElementById('timePickBg'))
+    document.getElementById('timePickBg').classList.remove('open');
 }
 
 // ━━━━━━━━━━━━━━━━━━━━
