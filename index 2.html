@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>勤務時間計算</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+    background: #f0f2f5;
+    color: #1a1a2e;
+    min-height: 100vh;
+  }
+
+  /* ── ヘッダー ── */
+  .header {
+    background: linear-gradient(135deg, #d84315, #ff6d00);
+    color: white;
+    padding: 16px 16px 12px;
+    text-align: center;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .header h1 { font-size: 17px; font-weight: 700; }
+  .header p  { font-size: 10px; opacity: 0.88; margin-top: 2px; }
+
+  /* ── カメラ読み取りボタン ── */
+  .ocr-bar {
+    margin: 10px 12px 0;
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+    overflow: hidden;
+  }
+  .ocr-btn {
+    width: 100%;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, #1565c0, #1976d2);
+    color: white;
+    border: none;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .ocr-btn:active { opacity: 0.85; }
+
+  /* ── 月選択 ── */
+  .month-bar {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    padding: 12px 16px;
+    background: white;
+    border-bottom: 1px solid #e0e0e0;
+    margin: 10px 12px 0;
+    border-radius: 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+  }
+  .month-btn {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: none; background: #fff3e0; color: #d84315;
+    font-size: 20px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .month-btn:active { background: #ffe0b2; }
+  .month-label { font-size: 17px; font-weight: 700; min-width: 110px; text-align: center; }
+
+  /* ── サマリー ── */
+  .summary {
+    margin: 10px 12px 0;
+    background: white;
+    border-radius: 14px;
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+  }
+  .summary-item { text-align: center; }
+  .summary-item .val { font-size: 22px; font-weight: 800; color: #d84315; line-height: 1; }
+  .summary-item .lbl { font-size: 10px; color: #888; margin-top: 3px; }
+
+  .note {
+    margin: 8px 12px 0;
+    background: #fff8e1;
+    border-left: 3px solid #ff6d00;
+    border-radius: 0 8px 8px 0;
+    padding: 7px 10px;
+    font-size: 11px; color: #6d4c00; line-height: 1.5;
+  }
+
+  /* ── テーブル ── */
+  .table-wrap {
+    margin: 10px 12px 100px;
+    background: white;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+  }
+  .tbl-head {
+    display: grid;
+    grid-template-columns: 38px 1fr 1fr 68px 32px;
+    background: #37474f; color: white;
+    font-size: 11px; font-weight: 600;
+    padding: 8px 10px; gap: 4px; text-align: center;
+  }
+  .day-row {
+    display: grid;
+    grid-template-columns: 38px 1fr 1fr 68px 32px;
+    align-items: center; gap: 4px;
+    padding: 7px 10px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .day-row:last-child { border-bottom: none; }
+  .day-row.sat { background: #e8f4fd; }
+  .day-row.sun { background: #fdecea; }
+  .day-row.today { background: #fff8e1; }
+  .day-row.ocr-filled { background: #e8f5e9; transition: background 1s; }
+
+  .day-cell { text-align: center; font-size: 13px; font-weight: 600; line-height: 1.2; }
+  .day-cell .dow { font-size: 10px; font-weight: 500; }
+  .day-cell.sat .dow { color: #1565c0; }
+  .day-cell.sun .dow { color: #c62828; }
+
+  /* タップ式時刻セル */
+  .time-cell {
+    width: 100%; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 7px 4px; font-size: 14px; font-weight: 600;
+    text-align: center; background: #fafafa; color: #1a1a2e;
+    cursor: pointer; -webkit-tap-highlight-color: rgba(255,109,0,0.12);
+    user-select: none;
+  }
+  .time-cell.empty { color: #ccc; font-size: 11px; font-weight: 400; }
+  .time-cell:active { background: #fff3e0; border-color: #ff6d00; }
+
+  /* 時刻ピッカーモーダル */
+  .timepick-bg {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 500;
+    align-items: flex-end; justify-content: center;
+  }
+  .timepick-bg.open { display: flex; }
+  .timepick-modal {
+    background: white; border-radius: 20px 20px 0 0;
+    padding: 20px 16px 36px; width: 100%; max-width: 480px;
+  }
+  .timepick-title { font-size: 16px; font-weight: 700; text-align: center; margin-bottom: 4px; }
+  .timepick-subtitle { font-size: 11px; color: #888; text-align: center; margin-bottom: 14px; }
+  .preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .preset-btn {
+    padding: 16px 4px; border: 2px solid #ff6d00; border-radius: 12px;
+    background: #fff8f0; color: #d84315; font-size: 19px; font-weight: 800;
+    font-family: inherit; cursor: pointer; text-align: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .preset-btn:active { background: #ff6d00; color: white; }
+  /* 数字パッド */
+  .divider-text { text-align: center; font-size: 11px; color: #bbb; margin: 10px 0 8px; }
+  .numpad-display {
+    font-size: 38px; font-weight: 800; text-align: center; color: #d84315;
+    letter-spacing: 6px; padding: 10px; background: #fff8f0;
+    border-radius: 12px; margin-bottom: 10px;
+  }
+  .numpad {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px;
+  }
+  .numpad-btn {
+    padding: 15px; font-size: 22px; font-weight: 700;
+    border: none; border-radius: 10px; background: #f5f5f5; color: #1a1a2e;
+    cursor: pointer; font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .numpad-btn:active { background: #e0e0e0; }
+  .numpad-btn.del { background: #fff3e0; color: #e65100; font-size: 18px; }
+  .numpad-btn.del:active { background: #ff6d00; color: white; }
+  .numpad-btn.ok  { background: #2e7d32; color: white; font-size: 16px; }
+  .numpad-btn.ok:active  { background: #1b5e20; }
+  .timepick-cancel {
+    width: 100%; padding: 13px; background: #f5f5f5; color: #555;
+    border: none; border-radius: 12px; font-size: 14px; font-weight: 600;
+    font-family: inherit; cursor: pointer;
+  }
+
+  .result-cell { text-align: center; font-size: 12px; line-height: 1.35; }
+  .result-cell .hours { font-size: 15px; font-weight: 700; color: #d84315; }
+  .result-cell .frac { font-size: 10px; color: #888; }
+  .result-cell .nowork { color: #bbb; font-size: 11px; }
+
+  .clear-btn {
+    background: none; border: none; color: #bbb; font-size: 18px; cursor: pointer;
+    padding: 0; width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── フッターバー ── */
+  .fab-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: white; border-top: 1px solid #e0e0e0;
+    padding: 10px 16px; display: flex; gap: 10px;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+  }
+  .fab-btn {
+    flex: 1; padding: 12px; border-radius: 10px; border: none;
+    font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer;
+  }
+  .fab-btn.primary { background: #d84315; color: white; }
+  .fab-btn.secondary { background: #f5f5f5; color: #555; }
+
+  /* ── OCR モーダル ── */
+  .modal-bg {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 300;
+    align-items: flex-end; justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: white; border-radius: 20px 20px 0 0;
+    padding: 0; width: 100%; max-width: 520px;
+    max-height: 92vh; overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  .modal-header {
+    padding: 18px 20px 12px;
+    border-bottom: 1px solid #eee;
+    position: sticky; top: 0; background: white; z-index: 10;
+    border-radius: 20px 20px 0 0;
+  }
+  .modal-header h2 { font-size: 16px; font-weight: 700; }
+  .modal-header p  { font-size: 12px; color: #888; margin-top: 3px; }
+  .modal-body { padding: 16px 20px; flex: 1; }
+
+  /* OCR ステップ */
+  .step { margin-bottom: 18px; }
+  .step-title { font-size: 13px; font-weight: 700; color: #37474f; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .step-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #d84315; color: white;
+    font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+
+  /* 撮影ボタン（モーダル内）— label 要素でも動作するよう button/label 両対応 */
+  .capture-btn {
+    width: 100%; padding: 14px;
+    background: #1565c0; color: white; border: none;
+    border-radius: 12px; font-size: 14px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    text-align: center; -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+  }
+  .capture-btn:active { opacity: 0.8; }
+  .capture-btn.gallery { background: #37474f; margin-top: 8px; }
+
+  /* プレビュー画像 */
+  #previewImg {
+    width: 100%; border-radius: 10px;
+    border: 2px solid #e0e0e0;
+    display: none; margin-top: 10px;
+    max-height: 250px; object-fit: contain; background: #000;
+  }
+
+  /* OCR進捗 */
+  .ocr-progress {
+    display: none; background: #f5f5f5; border-radius: 10px;
+    padding: 14px; margin-top: 10px; text-align: center;
+  }
+  .ocr-progress .prog-txt { font-size: 13px; color: #555; margin-bottom: 8px; }
+  .progress-bar-wrap { background: #e0e0e0; border-radius: 99px; height: 6px; overflow: hidden; }
+  .progress-bar { background: #1565c0; height: 100%; width: 0; transition: width 0.3s; border-radius: 99px; }
+
+  /* OCR結果テーブル */
+  .ocr-result { display: none; margin-top: 12px; }
+  .ocr-result h3 { font-size: 13px; font-weight: 700; margin-bottom: 8px; color: #2e7d32; }
+  .ocr-result-hint { font-size: 11px; color: #888; margin-bottom: 10px; }
+
+  .result-table-wrap { border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; }
+  .rt-head {
+    display: grid; grid-template-columns: 50px 1fr 1fr 60px;
+    background: #37474f; color: white;
+    font-size: 11px; font-weight: 600; padding: 7px 10px; gap: 4px; text-align: center;
+  }
+  .rt-row {
+    display: grid; grid-template-columns: 50px 1fr 1fr 60px;
+    align-items: center; gap: 4px; padding: 6px 10px;
+    border-bottom: 1px solid #f0f0f0; font-size: 13px;
+  }
+  .rt-row:last-child { border-bottom: none; }
+  .rt-row input {
+    width: 100%; border: 1px solid #ddd; border-radius: 6px;
+    padding: 4px 4px; text-align: center; font-size: 12px; font-family: inherit;
+    background: #fafafa;
+  }
+  .rt-row input:focus { border-color: #1565c0; outline: none; }
+  .rt-row .date-lbl { text-align: center; font-weight: 600; color: #37474f; }
+  .rt-row .skip-chk { display: flex; align-items: center; justify-content: center; }
+  .rt-row .skip-chk input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; }
+
+  /* 日付開始入力 */
+  .start-date-row {
+    display: flex; align-items: center; gap: 10px;
+    background: #f5f5f5; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;
+  }
+  .start-date-row label { font-size: 13px; color: #555; flex: 1; }
+  .start-date-row input {
+    width: 70px; border: 1px solid #ddd; border-radius: 8px;
+    padding: 6px; text-align: center; font-size: 16px; font-family: inherit;
+    background: white;
+  }
+
+  /* 適用ボタン */
+  .apply-btn {
+    width: 100%; padding: 14px; background: #2e7d32; color: white;
+    border: none; border-radius: 12px; font-size: 15px; font-weight: 700;
+    font-family: inherit; cursor: pointer; margin-top: 12px;
+  }
+  .apply-btn:active { opacity: 0.8; }
+  .modal-close-btn {
+    width: 100%; padding: 12px; background: #f5f5f5; color: #555;
+    border: none; border-radius: 12px; font-size: 14px; font-weight: 600;
+    font-family: inherit; cursor: pointer; margin-top: 8px;
+  }
+
+  /* 詳細モーダル */
+  .detail-modal-bg {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45); z-index: 200;
+    align-items: flex-end; justify-content: center;
+  }
+  .detail-modal-bg.open { display: flex; }
+  .detail-modal {
+    background: white; border-radius: 20px 20px 0 0;
+    padding: 20px 24px 34px; width: 100%; max-width: 480px;
+  }
+  .detail-modal h2 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+  .modal-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+  .modal-row:last-child { border-bottom: none; }
+  .modal-row .lbl { color: #666; }
+  .modal-row .val { font-weight: 700; font-size: 16px; color: #d84315; }
+  .detail-close { margin-top: 16px; width: 100%; padding: 14px; background: #37474f; color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; }
+
+  /* コピーエリア */
+  .copy-area { display: none; margin: 12px; background: white; border-radius: 12px; padding: 14px; box-shadow: 0 1px 6px rgba(0,0,0,0.07); }
+  .copy-area.open { display: block; }
+  .copy-area h3 { font-size: 13px; color: #666; margin-bottom: 8px; }
+  .copy-area textarea { width: 100%; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; font-size: 12px; font-family: 'Courier New', monospace; resize: none; min-height: 100px; background: #fafafa; }
+  .copy-btn { margin-top: 8px; width: 100%; padding: 10px; background: #1565c0; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📋 勤務時間計算</h1>
+  <p>始業・就業時刻を入力 → 実働時間を自動計算（15分単位）</p>
+</div>
+
+<!-- カメラ読み取りボタン -->
+<div class="ocr-bar">
+  <button class="ocr-btn" onclick="openOcrModal()">
+    📷 勤務表を撮影して自動入力
+  </button>
+</div>
+
+<!-- 月選択 -->
+<div class="month-bar">
+  <button class="month-btn" id="prevBtn">‹</button>
+  <span class="month-label" id="monthLabel"></span>
+  <button class="month-btn" id="nextBtn">›</button>
+</div>
+
+<!-- サマリー -->
+<div class="summary">
+  <div class="summary-item"><div class="val" id="sumDays">0</div><div class="lbl">出勤日数</div></div>
+  <div class="summary-item"><div class="val" id="sumHours">0.0</div><div class="lbl">合計実働（h）</div></div>
+  <div class="summary-item"><div class="val" id="sumFrac">0分</div><div class="lbl">端数合計</div></div>
+</div>
+
+<div class="note">
+  ⚠️ 6時間以上勤務の場合、休憩1時間を自動差し引き。実働時間は15分単位（端数切り捨て）。
+</div>
+
+<!-- 日付テーブル -->
+<div class="table-wrap">
+  <div class="tbl-head">
+    <div>日</div><div>始業</div><div>就業</div><div>実働時間</div><div></div>
+  </div>
+  <div id="tableBody"></div>
+</div>
+
+<!-- コピーエリア -->
+<div class="copy-area" id="copyArea">
+  <h3>📄 テキストデータ（コピー用）</h3>
+  <textarea id="copyText" readonly></textarea>
+  <button class="copy-btn" onclick="copyText()">クリップボードにコピー</button>
+</div>
+
+<!-- フッターボタン -->
+<div class="fab-bar">
+  <button class="fab-btn secondary" onclick="clearAll()">全クリア</button>
+  <button class="fab-btn primary" onclick="toggleCopy()">📋 一覧表示</button>
+</div>
+
+<!-- ======= 時刻ピッカーモーダル ======= -->
+<div class="timepick-bg" id="timePickBg" onclick="closeTimePicker(event)">
+  <div class="timepick-modal" onclick="event.stopPropagation()">
+    <div class="timepick-title" id="timePickTitle">始業時刻を選択</div>
+    <div class="timepick-subtitle" id="timePickSubtitle"></div>
+    <div class="preset-grid" id="presetGrid"></div>
+    <div class="divider-text">― または数字パッドで入力 ―</div>
+    <div class="numpad-display" id="numpadDisplay">__:__</div>
+    <div class="numpad">
+      <button class="numpad-btn" onclick="npTap(1)">1</button>
+      <button class="numpad-btn" onclick="npTap(2)">2</button>
+      <button class="numpad-btn" onclick="npTap(3)">3</button>
+      <button class="numpad-btn" onclick="npTap(4)">4</button>
+      <button class="numpad-btn" onclick="npTap(5)">5</button>
+      <button class="numpad-btn" onclick="npTap(6)">6</button>
+      <button class="numpad-btn" onclick="npTap(7)">7</button>
+      <button class="numpad-btn" onclick="npTap(8)">8</button>
+      <button class="numpad-btn" onclick="npTap(9)">9</button>
+      <button class="numpad-btn del" onclick="npDel()">⌫</button>
+      <button class="numpad-btn" onclick="npTap(0)">0</button>
+      <button class="numpad-btn ok" onclick="npConfirm()">✅ 確定</button>
+    </div>
+    <button class="timepick-cancel" onclick="closeTimePicker()">キャンセル</button>
+  </div>
+</div>
+
+<!-- ======= OCR モーダル ======= -->
+<div class="modal-bg" id="ocrModalBg" onclick="closeOcrModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>📷 勤務表を撮影して自動入力</h2>
+      <p>始業・就業時刻を自動で読み取ります</p>
+    </div>
+    <div class="modal-body">
+
+      <!-- STEP 1: 撮影 -->
+      <div class="step">
+        <div class="step-title"><span class="step-num">1</span>勤務表を撮影またはアルバムから選択</div>
+        <!-- iOS Safari対応: labelでinputを直接包む方式 -->
+        <label class="capture-btn" style="margin-top:0">
+          <input type="file" accept="image/*" capture="environment" style="display:none;position:absolute;width:0;height:0;" onchange="onImageSelected(this)">
+          📷 カメラで撮影（勤務表のページを写してください）
+        </label>
+        <label class="capture-btn gallery">
+          <input type="file" accept="image/*" style="display:none;position:absolute;width:0;height:0;" onchange="onImageSelected(this)">
+          🖼️ アルバムから選択
+        </label>
+        <img id="previewImg" alt="プレビュー">
+        <div class="ocr-progress" id="ocrProgress">
+          <div class="prog-txt" id="progTxt">解析中... しばらくお待ちください</div>
+          <div class="progress-bar-wrap"><div class="progress-bar" id="progBar"></div></div>
+        </div>
+      </div>
+
+      <!-- STEP 2: 日付設定 -->
+      <div class="step" id="step2" style="display:none">
+        <div class="step-title"><span class="step-num">2</span>写真の最初の行の日付を入力</div>
+        <div class="start-date-row">
+          <label>写真の一番上の日付（例：21）</label>
+          <input type="number" id="startDateInput" min="1" max="31" value="21" inputmode="numeric">
+        </div>
+        <button class="capture-btn" onclick="runOCR()" id="runOcrBtn"
+                style="background:#ff6d00;">
+          🔍 時刻を読み取る
+        </button>
+      </div>
+
+      <!-- STEP 3: 結果確認 -->
+      <div class="ocr-result" id="ocrResult">
+        <div class="step-title"><span class="step-num">3</span>読み取り結果を確認・修正</div>
+        <div class="ocr-result-hint">時刻を確認し、不要な行は右端のチェックを外してください</div>
+        <div class="result-table-wrap">
+          <div class="rt-head"><div>日付</div><div>始業</div><div>就業</div><div>適用</div></div>
+          <div id="ocrResultRows"></div>
+        </div>
+        <button class="apply-btn" onclick="applyOcrResults()">✅ この内容を入力欄に反映する</button>
+        <button class="modal-close-btn" onclick="closeOcrModal()">キャンセル</button>
+      </div>
+
+      <!-- モーダルが結果表示前の閉じるボタン -->
+      <div id="closeBtnArea">
+        <button class="modal-close-btn" style="margin-top:8px" onclick="closeOcrModal()">閉じる</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- 詳細モーダル -->
+<div class="detail-modal-bg" id="detailModalBg" onclick="closeDetailModal(event)">
+  <div class="detail-modal">
+    <h2 id="detailTitle"></h2>
+    <div id="detailContent"></div>
+    <button class="detail-close" onclick="closeDetailModal()">閉じる</button>
+  </div>
+</div>
+
+<!-- ファイル入力は各labelの中に内包済み -->
+
+<script>
+// ━━━━━━━━━━━━━━━━━━━━
+//  データ管理
+// ━━━━━━━━━━━━━━━━━━━━
+const DAYS_JA = ['日','月','火','水','木','金','土'];
+let year, month, data = {};
+const STORAGE_KEY = 'kinmu_v3';
+
+// 期間ヘルパー（21日〜翌20日）
+function getPeriodDays(pYear, pMonth) {
+  const endYear  = pMonth === 12 ? pYear + 1 : pYear;
+  const endMonth = pMonth === 12 ? 1 : pMonth + 1;
+  const daysInStart = new Date(pYear, pMonth, 0).getDate();
+  const days = [];
+  for (let d = 21; d <= daysInStart; d++) days.push({ y: pYear,  m: pMonth,  d });
+  for (let d = 1;  d <= 20;          d++) days.push({ y: endYear, m: endMonth, d });
+  return days;
+}
+function getKey(y, m, d) {
+  return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function periodEndInfo() {
+  const endYear  = month === 12 ? year + 1 : year;
+  const endMonth = month === 12 ? 1 : month + 1;
+  return { endYear, endMonth };
+}
+
+function saveData() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({year,month,data})); } catch(e){}
+}
+function loadData() {
+  try {
+    const s = localStorage.getItem(STORAGE_KEY);
+    if (s) { const o = JSON.parse(s); year=o.year; month=o.month; data=o.data||{}; }
+  } catch(e){}
+}
+
+// ━━━━━━━━━━━━━━━━━━━━
+//  計算
+// ━━━━━━━━━━━━━━━━━━━━
+function calcWork(start, end) {
+  if (!start || !end) return null;
+  const [sh,sm] = start.split(':').map(Number);
+  const [eh,em] = end.split(':').map(Number);
+  const totalMin = (eh*60+em) - (sh*60+sm);
+  if (totalMin <= 0) return null;
+  const actualMin = totalMin >= 360 ? totalMin - 60 : totalMin;
+  const roundedMin = Math.floor(actualMin/15)*15;
+  const fracMin = actualMin - roundedMin;
+  return { totalMin, actualMin, roundedMin, fracMin, hours: roundedMin/60 };
+}
+function fmt(min) {
+  const h=Math.floor(min/60), m=min%60;
+  return h>0 ? (m>0 ? `${h}時間${m}分` : `${h}時間`) : `${m}分`;
+}
+function fmtH(h) { return h%1===0 ? h+'.0' : h; }
+
+// ━━━━━━━━━━━━━━━━━━━━
+//  レンダリング
+// ━━━━━━━━━━━━━━━━━━━━
+function render() {
+  const today = new Date();
+  const { endYear, endMonth } = periodEndInfo();
+  document.getElementById('monthLabel').textContent =
+    `${year}年${month}月21日〜${endYear}年${endMonth}月20日`;
+
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  let sumDays=0, sumR=0, sumF=0;
+
+  for (const { y, m: mo, d } of getPeriodDays(year, month)) {
+    const dow = new Date(y, mo-1, d).getDay();
+    const key = getKey(y, mo, d);
+    const isToday = today.getFullYear()===y && today.getMonth()+1===mo && today.getDate()===d;
+    const entry = data[key]||{};
+    const calc = calcWork(entry.start, entry.end);
+    if (calc) { sumDays++; sumR+=calc.roundedMin; sumF+=calc.fracMin; }
+
+    let rc = 'day-row';
+    if (dow===0) rc+=' sun'; else if (dow===6) rc+=' sat';
+    if (isToday) rc+=' today';
+    if (entry.ocrFilled) rc+=' ocr-filled';
+
+    // 月をまたぐ1日だけ「5/1」形式で表示
+    const dayLabel = d===1 ? `${mo}/${d}` : String(d);
+
+    let resultHtml;
+    if (calc) {
+      resultHtml = `<div class="result-cell" onclick="showDetail('${key}')">
+        <div class="hours">${fmtH(calc.hours)}</div>
+        <div class="frac">${calc.fracMin>0?'端数'+calc.fracMin+'分':'端数なし'}</div>
+      </div>`;
+    } else {
+      resultHtml = `<div class="result-cell"><div class="nowork">−</div></div>`;
+    }
+
+    const row = document.createElement('div');
+    row.className = rc; row.id = 'row_'+key;
+    const sDisp = entry.start || '';
+    const eDisp = entry.end   || '';
+    row.innerHTML = `
+      <div class="day-cell ${dow===0?'sun':dow===6?'sat':''}">
+        <div>${dayLabel}</div><div class="dow">${DAYS_JA[dow]}</div>
+      </div>
+      <div class="time-cell${sDisp?'':' empty'}" onclick="openTimePicker('${key}','start')">${sDisp||'始業'}</div>
+      <div class="time-cell${eDisp?'':' empty'}" onclick="openTimePicker('${key}','end')">${eDisp||'就業'}</div>
+      ${resultHtml}
+      <button class="clear-btn" onclick="clearDay('${key}')">×</button>`;
+    tbody.appendChild(row);
+  }
+  document.getElementById('sumDays').textContent = sumDays;
+  document.getElementById('sumHours').textContent = fmtH(sumR/60);
+  document.getElementById('sumFrac').textContent = sumF+'分';
+}
+function setTime(key,field,val) {
+  if (!data[key]) data[key]={};
+  data[key][field]=val;
+  saveData(); render();
+}
+function clearDay(key) { delete data[key]; saveData(); render(); }
+function clearAll() {
+  const { endYear, endMonth } = periodEndInfo();
+  const label = `${year}年${month}月21日〜${endYear}年${endMonth}月20日`;
+  if (!confirm(`${label}のデータを全て消去しますか？`)) return;
+  getPeriodDays(year, month).forEach(({ y, m: mo, d }) => {
+    delete data[getKey(y, mo, d)];
+  });
+  saveData(); render();
+}
+document.getElementById('prevBtn').onclick=()=>{ month--; if(month<1){month=12;year--;} saveData();render(); };
+document.getElementById('nextBtn').onclick=()=>{ month++; if(month>12){month=1;year++;} saveData();render(); };
+
+// 詳細モーダル
+function showDetail(key) {
+  const entry=data[key]||{}, calc=calcWork(entry.start,entry.end);
+  if (!calc) return;
+  const [y,m,d]=key.split('-');
+  const dow=new Date(+y,+m-1,+d).getDay();
+  document.getElementById('detailTitle').textContent=`${+m}月${+d}日（${DAYS_JA[dow]}）の計算内訳`;
+  document.getElementById('detailContent').innerHTML=`
+    <div class="modal-row"><span class="lbl">始業</span><span class="val">${entry.start}</span></div>
+    <div class="modal-row"><span class="lbl">就業</span><span class="val">${entry.end}</span></div>
+    <div class="modal-row"><span class="lbl">在席時間</span><span class="val">${fmt(calc.totalMin)}</span></div>
+    <div class="modal-row"><span class="lbl">休憩控除</span><span class="val">${calc.totalMin>=360?'−60分':'なし'}</span></div>
+    <div class="modal-row"><span class="lbl">実働時間</span><span class="val">${fmt(calc.actualMin)}</span></div>
+    <div class="modal-row"><span class="lbl">記入値（15分単位）</span><span class="val">${fmtH(calc.hours)}時間</span></div>
+    <div class="modal-row"><span class="lbl">端数</span><span class="val">${calc.fracMin>0?calc.fracMin+'分':'なし'}</span></div>`;
+  document.getElementById('detailModalBg').classList.add('open');
+}
+function closeDetailModal(e) {
+  if (!e||e.target===document.getElementById('detailModalBg'))
+    document.getElementById('detailModalBg').classList.remove('open');
+}
+
+// コピー
+function toggleCopy() {
+  const a=document.getElementById('copyArea');
+  a.classList.toggle('open');
+  if (a.classList.contains('open')) buildCopyText();
+}
+function buildCopyText() {
+  const { endYear, endMonth } = periodEndInfo();
+  let lines=[`${year}年${month}月21日〜${endYear}年${endMonth}月20日 勤務時間集計\n`,'日付\t始業\t就業\t実働\t端数','─'.repeat(30)];
+  let sD=0,sR=0,sF=0;
+  for (const { y, m: mo, d } of getPeriodDays(year, month)) {
+    const key=getKey(y,mo,d);
+    const dow=new Date(y,mo-1,d).getDay();
+    const e=data[key]||{}, c=calcWork(e.start,e.end);
+    if (c) { sD++;sR+=c.roundedMin;sF+=c.fracMin; lines.push(`${mo}/${d}(${DAYS_JA[dow]})\t${e.start}\t${e.end}\t${fmtH(c.hours)}h\t${c.fracMin}分`); }
+  }
+  lines.push('─'.repeat(30));
+  lines.push(`出勤日数:${sD}日`);
+  lines.push(`合計実働:${fmtH(sR/60)}時間`);
+  lines.push(`端数合計:${sF}分`);
+  document.getElementById('copyText').value=lines.join('\n');
+  document.getElementById('copyArea').scrollIntoView({behavior:'smooth'});
+}
+function copyText() {
+  const ta=document.getElementById('copyText'); ta.select();
+  try { navigator.clipboard.writeText(ta.value).then(()=>alert('コピーしました！')); }
+  catch(e) { document.execCommand('copy'); alert('コピーしました！'); }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━
+//  時刻ピッカー
+// ━━━━━━━━━━━━━━━━━━━━
+const START_PRESETS = ['7:45', '8:30', '10:30'];
+const END_PRESETS   = ['17:00', '17:15', '17:30', '18:00'];
+
+let pickKey = null, pickField = null;
+
+function openTimePicker(key, field) {
+  pickKey = key; pickField = field;
+  const isStart = field === 'start';
+  const presets = isStart ? START_PRESETS : END_PRESETS;
+  document.getElementById('timePickTitle').textContent = isStart ? '始業時刻を選択' : '就業時刻を選択';
+  // 現在値を補足表示
+  const cur = (data[key]||{})[field];
+  document.getElementById('timePickSubtitle').textContent = cur ? `現在: ${cur}` : '';
+  // プリセットボタン生成
+  const grid = document.getElementById('presetGrid');
+  grid.innerHTML = '';
+  // グリッド列数をプリセット数に合わせる
+  grid.style.gridTemplateColumns = `repeat(${presets.length}, 1fr)`;
+  presets.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = t;
+    btn.onclick = () => { setTime(pickKey, pickField, t); closeTimePicker(); };
+    grid.appendChild(btn);
+  });
+  npReset();
+  document.getElementById('timePickBg').classList.add('open');
+}
+
+// 数字パッド
+let npDigits = [];
+function npReset() { npDigits = []; updateNpDisplay(); }
+function npTap(n) {
+  if (npDigits.length >= 4) return;
+  npDigits.push(n);
+  updateNpDisplay();
+}
+function npDel() { npDigits.pop(); updateNpDisplay(); }
+function updateNpDisplay() {
+  const d = npDigits;
+  let s = '__:__';
+  if (d.length===1) s=`${d[0]}_:__`;
+  else if (d.length===2) s=`${d[0]}${d[1]}:__`;
+  else if (d.length===3) s=`${d[0]}${d[1]}:${d[2]}_`;
+  else if (d.length===4) s=`${d[0]}${d[1]}:${d[2]}${d[3]}`;
+  document.getElementById('numpadDisplay').textContent = s;
+}
+function npConfirm() {
+  if (npDigits.length !== 4) { alert('4桁入力してください\n例：1 7 1 5 → 17:15'); return; }
+  const h = parseInt(npDigits.slice(0,2).join(''));
+  const m = parseInt(npDigits.slice(2,4).join(''));
+  if (h>23||m>59) { alert('正しい時刻ではありません'); npReset(); return; }
+  const t = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  setTime(pickKey, pickField, t);
+  closeTimePicker();
+}
+
+function parseTimeStr(raw) {
+  let h, m;
+  const digits = raw.replace(':', '');
+  if (/^\d{3}$/.test(digits))      { h = parseInt(digits[0]);       m = parseInt(digits.slice(1)); }
+  else if (/^\d{4}$/.test(digits)) { h = parseInt(digits.slice(0,2)); m = parseInt(digits.slice(2)); }
+  else if (/^\d{1,2}:\d{2}$/.test(raw)) { [h, m] = raw.split(':').map(Number); }
+  else return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+function closeTimePicker(e) {
+  if (!e || e.target === document.getElementById('timePickBg'))
+    document.getElementById('timePickBg').classList.remove('open');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━
+//  OCR 機能
+// ━━━━━━━━━━━━━━━━━━━━
+let capturedImageURL = null;
+
+function openOcrModal() {
+  document.getElementById('ocrModalBg').classList.add('open');
+  document.getElementById('previewImg').style.display='none';
+  document.getElementById('step2').style.display='none';
+  document.getElementById('ocrResult').style.display='none';
+  document.getElementById('ocrProgress').style.display='none';
+  document.getElementById('closeBtnArea').style.display='block';
+}
+function closeOcrModal(e) {
+  if (!e||e.target===document.getElementById('ocrModalBg'))
+    document.getElementById('ocrModalBg').classList.remove('open');
+}
+
+function onImageSelected(input) {
+  if (!input.files||!input.files[0]) return;
+  const file = input.files[0];
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    capturedImageURL = e.target.result;
+    const img = document.getElementById('previewImg');
+    img.src = capturedImageURL;
+    img.style.display = 'block';
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('ocrResult').style.display = 'none';
+    document.getElementById('closeBtnArea').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+// 画像のコントラスト強化（Canvas処理）
+function preprocessImage(dataURL) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width; canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      // グレースケール + コントラスト強化
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imageData.data;
+      for (let i=0; i<d.length; i+=4) {
+        const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+        // コントラスト強化（しきい値128を中心に伸張）
+        const enhanced = Math.min(255, Math.max(0, (gray - 128) * 1.5 + 128));
+        d[i]=d[i+1]=d[i+2]=enhanced;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.src = dataURL;
+  });
+}
+
+async function runOCR() {
+  if (!capturedImageURL) { alert('先に写真を選択してください'); return; }
+  document.getElementById('ocrProgress').style.display='block';
+  document.getElementById('runOcrBtn').disabled=true;
+  document.getElementById('ocrResult').style.display='none';
+  document.getElementById('progBar').style.width='5%';
+  document.getElementById('progTxt').textContent='画像を前処理中...';
+
+  try {
+    // 画像前処理
+    const processedImg = await preprocessImage(capturedImageURL);
+    document.getElementById('progBar').style.width='15%';
+    document.getElementById('progTxt').textContent='OCRエンジンを起動中...';
+
+    // Tesseract OCR
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = Math.round(15 + m.progress * 75);
+          document.getElementById('progBar').style.width = pct+'%';
+          document.getElementById('progTxt').textContent = `文字を解析中... ${Math.round(m.progress*100)}%`;
+        }
+      }
+    });
+    // 数字・コロンに特化した設定
+    await worker.setParameters({
+      tessedit_char_whitelist: '0123456789:.',
+      tessedit_pageseg_mode: '6',
+    });
+    const { data: { text } } = await worker.recognize(processedImg);
+    await worker.terminate();
+
+    document.getElementById('progBar').style.width='95%';
+    document.getElementById('progTxt').textContent='時刻パターンを検出中...';
+
+    // 時刻パターン抽出（数字をよりフレキシブルにマッチ）
+    const times = extractTimes(text);
+
+    document.getElementById('progBar').style.width='100%';
+    document.getElementById('progTxt').textContent=`完了！ ${times.length}個の時刻を検出`;
+
+    setTimeout(()=>{
+      document.getElementById('ocrProgress').style.display='none';
+      document.getElementById('runOcrBtn').disabled=false;
+      showOcrResults(times);
+    }, 800);
+
+  } catch(err) {
+    console.error(err);
+    document.getElementById('ocrProgress').style.display='none';
+    document.getElementById('runOcrBtn').disabled=false;
+    alert('OCR処理中にエラーが発生しました。\n\n手動で時刻を入力してください。\n\nエラー: '+err.message);
+  }
+}
+
+function extractTimes(text) {
+  const times = [];
+  // HH:MM または H:MM パターン
+  const pattern = /\b([0-2]?\d)[:\.]([0-5]\d)\b/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const h = parseInt(match[1]);
+    const m = parseInt(match[2]);
+    // 妥当な時刻範囲のみ
+    if (h >= 5 && h <= 22 && m >= 0 && m <= 59) {
+      times.push(`${h}:${String(m).padStart(2,'0')}`);
+    }
+  }
+  return times;
+}
+
+// OCR用: 開始日番号 + 行インデックス → 期間内の実際の日付
+function getOcrDate(startDay, rowIndex) {
+  const { endYear, endMonth } = periodEndInfo();
+  const daysInStart = new Date(year, month, 0).getDate();
+  let curYear, curMonth, curDay;
+  if (startDay >= 21) {
+    curYear  = year;
+    curMonth = month;
+    curDay   = startDay + rowIndex;
+    if (curDay > daysInStart) {
+      curDay   = curDay - daysInStart; // 1日〜
+      curMonth = endMonth;
+      curYear  = endYear;
+    }
+    if (curMonth === endMonth && curDay > 20) return null;
+  } else {
+    curYear  = endYear;
+    curMonth = endMonth;
+    curDay   = startDay + rowIndex;
+    if (curDay > 20) return null;
+  }
+  return { y: curYear, m: curMonth, d: curDay };
+}
+
+function showOcrResults(times) {
+  const startDay = parseInt(document.getElementById('startDateInput').value)||21;
+
+  // 始業は5〜13時、就業は13〜22時と想定
+  const starts = times.filter(t => { const h=parseInt(t.split(':')[0]); return h>=5&&h<14; });
+  const ends   = times.filter(t => { const h=parseInt(t.split(':')[0]); return h>=13&&h<=22; });
+  const pairCount = Math.max(starts.length, ends.length, 1);
+
+  const container = document.getElementById('ocrResultRows');
+  container.innerHTML='';
+
+  let rendered = 0;
+  for (let i=0; i<pairCount && rendered<14; i++) {
+    const dateInfo = getOcrDate(startDay, i);
+    if (!dateInfo) break;
+    const { y, m: mo, d } = dateInfo;
+    const dow = new Date(y, mo-1, d).getDay();
+    const startVal = starts[i]||'';
+    const endVal   = ends[i]||'';
+    const rowId = `${y}_${mo}_${d}`;
+
+    const row = document.createElement('div');
+    row.className='rt-row';
+    row.dataset.y=y; row.dataset.mo=mo; row.dataset.d=d;
+    row.innerHTML=`
+      <div class="date-lbl">${mo}/${d}<br><small style="color:#888">${DAYS_JA[dow]}</small></div>
+      <input type="time" id="ocr_s_${rowId}" value="${startVal}">
+      <input type="time" id="ocr_e_${rowId}" value="${endVal}">
+      <div class="skip-chk"><input type="checkbox" id="ocr_chk_${rowId}" ${(startVal||endVal)?'checked':''}></div>`;
+    container.appendChild(row);
+    rendered++;
+  }
+
+  // 追加行ボタン
+  const addBtn = document.createElement('div');
+  addBtn.style.padding='8px 10px';
+  addBtn.innerHTML=`<button onclick="addOcrRow()" style="width:100%;padding:8px;border:1px dashed #ccc;border-radius:8px;background:none;color:#888;font-size:13px;cursor:pointer;">＋ 行を追加</button>`;
+  container.appendChild(addBtn);
+
+  document.getElementById('ocrResult').style.display='block';
+  document.getElementById('ocrResult').scrollIntoView({behavior:'smooth'});
+}
+
+function addOcrRow() {
+  const startDay = parseInt(document.getElementById('startDateInput').value)||21;
+  const existingRows = document.getElementById('ocrResultRows').querySelectorAll('.rt-row').length;
+  const dateInfo = getOcrDate(startDay, existingRows);
+  if (!dateInfo) { alert('これ以上行を追加できません（期間外です）'); return; }
+  const { y, m: mo, d } = dateInfo;
+  const dow = new Date(y, mo-1, d).getDay();
+  const rowId = `${y}_${mo}_${d}`;
+  const row = document.createElement('div');
+  row.className='rt-row';
+  row.dataset.y=y; row.dataset.mo=mo; row.dataset.d=d;
+  row.innerHTML=`
+    <div class="date-lbl">${mo}/${d}<br><small style="color:#888">${DAYS_JA[dow]}</small></div>
+    <input type="time" id="ocr_s_${rowId}" value="">
+    <input type="time" id="ocr_e_${rowId}" value="">
+    <div class="skip-chk"><input type="checkbox" id="ocr_chk_${rowId}"></div>`;
+  const container = document.getElementById('ocrResultRows');
+  container.insertBefore(row, container.lastElementChild);
+}
+
+function applyOcrResults() {
+  const rows = document.getElementById('ocrResultRows').querySelectorAll('.rt-row');
+  let applied=0;
+  rows.forEach(row => {
+    const y  = parseInt(row.dataset.y);
+    const mo = parseInt(row.dataset.mo);
+    const d  = parseInt(row.dataset.d);
+    const rowId = `${y}_${mo}_${d}`;
+    const chk = document.getElementById('ocr_chk_'+rowId);
+    const s   = document.getElementById('ocr_s_'+rowId);
+    const e   = document.getElementById('ocr_e_'+rowId);
+    if (!chk||!chk.checked) return;
+    const key = getKey(y, mo, d);
+    if (!data[key]) data[key]={};
+    if (s&&s.value) { data[key].start=s.value; }
+    if (e&&e.value) { data[key].end=e.value; }
+    if ((s&&s.value)||(e&&e.value)) { data[key].ocrFilled=true; applied++; }
+  });
+  saveData();
+  closeOcrModal();
+  render();
+  // 少し後にハイライトをリセット
+  setTimeout(()=>{
+    Object.keys(data).forEach(k=>{ if(data[k].ocrFilled) delete data[k].ocrFilled; });
+    saveData();
+  }, 3000);
+  alert(`${applied}日分のデータを入力しました！\n緑色の行が反映された箇所です。\n内容を確認し、必要な修正をしてください。`);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━
+//  初期化
+// ━━━━━━━━━━━━━━━━━━━━
+loadData();
+if (!year||!month) {
+  const n = new Date();
+  year  = n.getFullYear();
+  month = n.getMonth() + 1;
+  // 今日が1〜20日 → 前月21日〜今月20日の期間
+  if (n.getDate() <= 20) {
+    month--;
+    if (month < 1) { month = 12; year--; }
+  }
+  // 今日が21日以降 → 今月21日〜来月20日の期間（そのまま）
+}
+render();
+</script>
+</body>
+</html>
